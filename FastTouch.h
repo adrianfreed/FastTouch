@@ -12,7 +12,9 @@
 #define FastTouch_h
 
 #include <Arduino.h>
-
+#if defined(CORE_TEENSY)
+#include "core_pins.h"
+#endif
 
 #ifndef BIT_SET
 # define BIT_SET(value, bit)             ((value) |=  (1UL << (bit)))

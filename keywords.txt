@@ -1,2 +1,2 @@
-fastTouchRead			KEYWORD1
-fastTouchMax			KEYWORD1
+fastTouchRead	KEYWORD1
+fastTouchMax	KEYWORD1

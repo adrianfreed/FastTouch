@@ -12,7 +12,67 @@
 
 
 #if defined(CORE_TEENSY)
-#if defined(__MKL26Z64__) /* Teensy 3LC */
+
+//#if defined(__IMXRT1052__) || defined(__IMXRT10562__)
+
+#if defined(__IMXRT1052__) || defined(__IMXRT1062__)
+
+FASTRUN
+int fastTouchRead(int  pin)
+{
+    int i;
+    const struct digital_pin_bitband_and_config_table_struct *p;
+    if (pin >= CORE_NUM_DIGITAL) return -1;
+     p = digital_pin_to_info_PGM + pin;
+ 
+    
+    pinMode(pin, OUTPUT_OPENDRAIN);
+    digitalWrite(pin, LOW);
+    delayMicroseconds(1);
+    /* disable interrupts */
+    noInterrupts();
+    pinMode(pin, INPUT_PULLUP);
+    i=0;
+    if((*(p->reg + 2) & p->mask)!=0)
+        goto out;
+    if((*(p->reg + 2) & p->mask)!=0)
+        goto out;
+    if((*(p->reg + 2) & p->mask)!=0)
+        goto out;
+    i++;
+    if((*(p->reg + 2) & p->mask)!=0)
+        goto out;
+    i++;
+    if((*(p->reg + 2) & p->mask)!=0)
+        goto out;
+    i++;
+    if((*(p->reg + 2) & p->mask)!=0)
+        goto out;
+    i++;
+    if((*(p->reg + 2) & p->mask)!=0)
+        goto out;
+    i++;
+    if((*(p->reg + 2) & p->mask)!=0)
+        goto out;
+    i++;
+    
+    for(;i<64;++i)
+        if((*(p->reg + 2) & p->mask)!=0)
+            break;
+//        v += fastDigitalRead(pin)? 0:1;
+    {
+   
+        pinMode(pin, OUTPUT_OPENDRAIN);
+        digitalWrite(pin, LOW);
+        
+        
+        
+    }
+out:
+    interrupts();
+    return i;
+}
+#elif defined(__MKL26Z64__)|| defined(__IMXRT1052__) || defined(__IMXRT1062__) /* Teensy 3LC */
 FASTRUN
 int fastTouchRead(int pin)
 {
@@ -348,6 +408,8 @@ int fastTouchRead(int pin)
         a = *portInputRegister(pin) ;
         a = *portInputRegister(pin) ;
         a = *portInputRegister(pin) ;
+        
+        
         a = *portInputRegister(pin) ;
         a = *portInputRegister(pin) ;
         a = *portInputRegister(pin) ;
