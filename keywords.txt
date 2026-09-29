@@ -1,2 +1,4 @@
 fastTouchRead	KEYWORD1
 fastTouchMax	KEYWORD1
+fastTouchBegin	KEYWORD1
+fastTouchReadAll	KEYWORD1

@@ -236,6 +236,19 @@ ft_xz = PORT->Group[g_APinDescription[pin].ulPort].IN.reg, \
 !(ft_xz & (1ul << g_APinDescription[pin].ulPin))  \
 )
 
+#elif defined(ARDUINO_ARCH_RP2040)
+// RP2040 and RP2350 (A and B variants) via pico-sdk SIO block
+#include "hardware/gpio.h"
+#include "hardware/sync.h"
+#include "hardware/structs/sio.h"
+
+int fastTouchRead(int pin);
+extern int fastTouchMax(void);
+
+// Parallel multi-channel API: read all channels in one scan
+void fastTouchBegin(uint32_t sense_mask);
+void fastTouchReadAll(uint32_t sense_mask, uint8_t *results, int n_samples);
+
 #else
 int fastTouchRead( int );
 extern int fastTouchMax(void);

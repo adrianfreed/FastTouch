@@ -795,9 +795,135 @@ int fastTouchRead(int pin)
 #endif
 #endif
 
+// --- RP2040 / RP2350 (Arduino-Pico core) ---
+#if defined(ARDUINO_ARCH_RP2040)
+
+#include "hardware/gpio.h"
+#include "hardware/sync.h"
+#include "hardware/structs/sio.h"
+
+// Single-pin capacitive touch read via SIO gpio_in.
+// Returns count of samples (out of 64) where the pin was still LOW
+// after releasing from discharge to INPUT_PULLUP.
+//
+// gpio_init() is called once per pin (lazy) to set the SIO function
+// and enable the pad input buffer (IE bit). The pullup is also
+// enabled once and left on permanently — during discharge the output
+// driver easily overpowers the ~50kΩ internal pullup (~66µA), so
+// the pin stays LOW regardless. When OE is cleared the pullup is
+// already live and charging begins immediately with no APB writes
+// in the critical section.
+int fastTouchRead(int pin)
+{
+    static uint32_t _ft_rp_inited = 0;
+    uint32_t mask = 1UL << pin;
+
+    // First call per pin: init GPIO and pre-enable pullup
+    if (!(_ft_rp_inited & mask)) {
+        gpio_init(pin);
+        gpio_pull_up(pin);
+        _ft_rp_inited |= mask;
+    }
+
+    // Discharge: drive pin LOW — pullup stays enabled but the
+    // output driver wins, pin is held LOW
+    sio_hw->gpio_clr = mask;
+    sio_hw->gpio_oe_set = mask;
+    delayMicroseconds(2);
+
+    // Release to input — pullup is already live, charging starts
+    uint32_t saved = save_and_disable_interrupts();
+    sio_hw->gpio_oe_clr = mask;
+
+    int count = 0;
+    for (int i = 0; i < 64; i++) {
+        if (!(sio_hw->gpio_in & mask))
+            count++;
+    }
+    restore_interrupts(saved);
+
+    // Leave pin discharged for next cycle
+    sio_hw->gpio_clr = mask;
+    sio_hw->gpio_oe_set = mask;
+
+    return count;
+}
+
+// Configure all sense pins for parallel capacitive touch.
+// Call once at startup. Initialises each pin as GPIO with input
+// buffer enabled, pre-enables the internal pullup (left on
+// permanently), and leaves all pins discharged (output LOW).
+//
+// The pullup draws ~66µA per pin while the output driver holds
+// LOW during discharge (25 pins ≈ 1.65mA for 2µs) — negligible.
+void fastTouchBegin(uint32_t sense_mask)
+{
+    for (int i = 0; i < 32; i++) {
+        if (sense_mask & (1UL << i)) {
+            gpio_init(i);
+            gpio_pull_up(i);
+            gpio_set_dir(i, GPIO_OUT);
+            gpio_put(i, 0);
+        }
+    }
+}
+
+// Parallel multi-channel capacitive touch read.
+// Discharges all pins in sense_mask simultaneously, waits 2 us,
+// clears OE in a single SIO write (pullups already live from
+// fastTouchBegin), then samples sio_hw->gpio_in n_samples times
+// with interrupts disabled. No APB writes in the critical section.
+//
+// For each pin in sense_mask, stores in results[bit_position] the
+// number of samples where that pin was still LOW (higher = more
+// capacitance = touch detected).
+//
+// n_samples is clamped to 255 (uint8_t max).
+void fastTouchReadAll(uint32_t sense_mask, uint8_t *results, int n_samples)
+{
+    if (n_samples > 255) n_samples = 255;
+
+    // Zero result counters for active pins
+    for (int i = 0; i < 32; i++) {
+        if (sense_mask & (1UL << i))
+            results[i] = 0;
+    }
+
+    // Discharge all sense pins: output LOW
+    // Pullups stay enabled — driver overpowers them
+    sio_hw->gpio_clr = sense_mask;
+    sio_hw->gpio_oe_set = sense_mask;
+    delayMicroseconds(2);
+
+    // --- Critical section: single SIO write + sample loop ---
+    uint32_t saved = save_and_disable_interrupts();
+    sio_hw->gpio_oe_clr = sense_mask;   // pullups already live
+
+    for (int s = 0; s < n_samples; s++) {
+        uint32_t low = (~sio_hw->gpio_in) & sense_mask;
+        while (low) {
+            int b = __builtin_ctz(low);
+            results[b]++;
+            low &= low - 1;             // clear lowest set bit
+        }
+    }
+    restore_interrupts(saved);
+    // --- End critical section ---
+
+    // Re-discharge all sense pins
+    sio_hw->gpio_clr = sense_mask;
+    sio_hw->gpio_oe_set = sense_mask;
+}
+
+#endif // ARDUINO_ARCH_RP2040
+
 int fastTouchMax()
 {
+#if defined(ARDUINO_ARCH_RP2040)
+    return 64;
+#else
     return 60;
+#endif
 }
 
 
