@@ -1,7 +1,7 @@
 //
 //
 //FastTouch.h
-// Fast Touch Sensing for AVR and Teensy 3
+// Fast Touch Sensing for AVR, SAMD21, Teensy and RP2040/RP2350
 // Copyright (c) 2006-2026 Adrian Freed. MIT License; see LICENSE.
 // Tested on Teensy 2.0, Clio, Lilypad,  Lilypad USB, Flora, Leonardo, UNO, Micro, BLEpad, PRO Mini,
 // Teensy 3.2 (more sensitive with optimized compiler settings and higher clock rate)
@@ -23,13 +23,12 @@
 
 
 //Arduino
+// (the ATmega1281/2561 are not listed: they have no ports H-L, which this map uses)
 #if (defined(ARDUINO_AVR_MEGA) || \
 defined(ARDUINO_AVR_MEGA1280) || \
 defined(ARDUINO_AVR_MEGA2560) || \
 defined(__AVR_ATmega1280__) || \
-defined(__AVR_ATmega1281__) || \
-defined(__AVR_ATmega2560__) || \
-defined(__AVR_ATmega2561__))
+defined(__AVR_ATmega2560__))
 
 #define __digitalPinToPortReg(P) \
 (((P) >= 22 && (P) <= 29) ? &PORTA : \
@@ -92,9 +91,9 @@ defined(__AVR_ATmega644P__))
 #define __digitalPinToPortReg(P) \
 (((P) >= 0 && (P) <= 7) ? &PORTB : (((P) >= 8 && (P) <= 15) ? &PORTD : (((P) >= 16 && (P) <= 23) ? &PORTC : &PORTA)))
 #define __digitalPinToDDRReg(P) \
-(((P) >= 0 && (P) <= 7) ? &DDRB : (((P) >= 8 && (P) <= 15) ? &DDRD : (((P) >= 8 && (P) <= 15) ? &DDRC : &DDRA)))
+(((P) >= 0 && (P) <= 7) ? &DDRB : (((P) >= 8 && (P) <= 15) ? &DDRD : (((P) >= 16 && (P) <= 23) ? &DDRC : &DDRA)))
 #define __digitalPinToPINReg(P) \
-(((P) >= 0 && (P) <= 7) ? &PINB : (((P) >= 8 && (P) <= 15) ? &PIND : (((P) >= 8 && (P) <= 15) ? &PINC : &PINA)))
+(((P) >= 0 && (P) <= 7) ? &PINB : (((P) >= 8 && (P) <= 15) ? &PIND : (((P) >= 16 && (P) <= 23) ? &PINC : &PINA)))
 #define __digitalPinToBit(P) \
 (((P) >= 0 && (P) <= 7) ? (P) : (((P) >= 8 && (P) <= 15) ? (P) - 8 : (((P) >= 16 && (P) <= 23) ? (P) - 16 : (P) - 24)))
 
@@ -130,6 +129,8 @@ defined(__AVR_ATmega32U4__))
 // --- Arduino Uno ---
 #elif (defined(ARDUINO_AVR_UNO) || \
 defined(ARDUINO_AVR_DUEMILANOVE) || \
+defined(__AVR_ATmega168__) || \
+defined(__AVR_ATmega168P__) || \
 defined(__AVR_ATmega328__) || \
 defined(__AVR_ATmega328P__) || \
 defined(__AVR_ATmega328PB__))
@@ -157,6 +158,8 @@ defined(__AVR_ATmega328PB__))
 #endif
 
 
+#elif defined(AVR)
+#error "FastTouch has no pin map for this AVR chip; it covers the ATmega168/168P/328/328P/328PB, 32U4/16U4, 1280/2560 and 644/644P"
 #endif
 
 #if defined(AVR)
@@ -237,20 +240,36 @@ ft_xz = PORT->Group[g_APinDescription[pin].ulPort].IN.reg, \
 )
 
 #elif defined(ARDUINO_ARCH_RP2040)
-// RP2040 and RP2350 (A and B variants) via pico-sdk SIO block
+// RP2040 and RP2350 (A and B variants) via pico-sdk SIO block.
+// Sense pins: GPIO 0-29 on RP2040 and RP2350A, GPIO 0-31 on RP2350B
+// (sio_hw->gpio_in holds GPIO 0-29 on RP2040 and 0-31 on RP2350; RP2350B's
+// GPIO 32-47 are not supported).
 #include "hardware/gpio.h"
 #include "hardware/sync.h"
 #include "hardware/structs/sio.h"
 
+// 0..fastTouchMax(), or -1 for a pin outside the sense-pin range above
 int fastTouchRead(int pin);
-extern int fastTouchMax(void);
 
-// Parallel multi-channel API: read all channels in one scan
+// Parallel multi-channel API: read all channels in one scan.
+// Bits of sense_mask outside the sense-pin range are ignored.
 void fastTouchBegin(uint32_t sense_mask);
+// results[] is indexed by GPIO number, so it needs 32 entries; each count is
+// 0..n_samples, and n_samples is clamped to 0..255. Not reentrant: the reads
+// go through one static buffer, so do not call it from both cores at once or
+// from an interrupt handler.
 void fastTouchReadAll(uint32_t sense_mask, uint8_t *results, int n_samples);
 
+#elif defined(CORE_TEENSY)
+// Teensy 3.x, LC and 4.x; Teensy 2.0 is AVR and uses the macro above
+int fastTouchRead(int pin);
+
 #else
-int fastTouchRead( int );
-extern int fastTouchMax(void);
+#error "FastTouch supports AVR, SAMD21, Teensy and RP2040/RP2350 (Arduino-Pico core) boards; this board is none of those"
 #endif
+
+// The largest value fastTouchRead() can return on this board
+// (fastTouchReadAll counts go up to its n_samples instead)
+int fastTouchMax(void);
+
 #endif /* FastTouch_h */

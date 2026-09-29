@@ -11,7 +11,8 @@
 
 
 
-#if defined(CORE_TEENSY)
+// ARM Teensys only: Teensy 2.0 is AVR and gets the fastTouchRead macro in FastTouch.h
+#if defined(CORE_TEENSY) && !defined(AVR)
 
 //#if defined(__IMXRT1052__) || defined(__IMXRT10562__)
 
@@ -802,63 +803,71 @@ int fastTouchRead(int pin)
 #include "hardware/sync.h"
 #include "hardware/structs/sio.h"
 
+// Sense pins this code can use: RP2040 and RP2350A have GPIO 0-29, and
+// RP2350B's sio_hw->gpio_in holds GPIO 0-31 (GPIO 32-47 are in gpio_hi_in).
+// PICO_RP2350A is 0 only on RP2350B, and the core refuses PICO_RP2350B.
+#if defined(PICO_RP2350) && defined(PICO_RP2350A) && !PICO_RP2350A
+#define FT_RP_GPIOS 32
+#else
+#define FT_RP_GPIOS 30
+#endif
+#define FT_RP_VALID_MASK ((uint32_t)(((uint64_t)1 << FT_RP_GPIOS) - 1))
+
 // Single-pin capacitive touch read via SIO gpio_in.
-// Returns count of samples (out of 64) where the pin was still LOW
-// after releasing from discharge to INPUT_PULLUP.
+// Returns how many of 64 reads, taken after the pin is released from
+// discharge onto its pull-up, still see it LOW (0..64), or -1 for a pin
+// outside GPIO 0..FT_RP_GPIOS-1.
 //
-// gpio_init() is called once per pin (lazy) to set the SIO function
-// and enable the pad input buffer (IE bit). The pullup is also
-// enabled once and left on permanently — during discharge the output
-// driver easily overpowers the ~50kΩ internal pullup (~66µA), so
-// the pin stays LOW regardless. When OE is cleared the pullup is
-// already live and charging begins immediately with no APB writes
-// in the critical section.
+// Every call sets the pin up again (SIO function, input buffer on, pad
+// isolation and overrides cleared, pull-up on) before discharging it, so it
+// keeps working after pinMode() or analogRead() has reconfigured the pin; it
+// leaves interrupt enables, drive strength, slew and Schmitt settings alone.
+// Those are APB
+// writes before the timed section; none happen inside it. During
+// discharge the output driver holds the pin LOW against the ~50kΩ
+// internal pull-up, and when OE is cleared the pull-up is already live.
 int fastTouchRead(int pin)
 {
-    static uint32_t _ft_rp_inited = 0;
-    uint32_t mask = 1UL << pin;
+    if (pin < 0 || pin >= FT_RP_GPIOS)
+        return -1;
+    const uint32_t mask = 1UL << pin;
 
-    // First call per pin: init GPIO and pre-enable pullup
-    if (!(_ft_rp_inited & mask)) {
-        gpio_init(pin);
-        gpio_pull_up(pin);
-        _ft_rp_inited |= mask;
-    }
+    gpio_init(pin);        // SIO function, input buffer on, output off
+    gpio_pull_up(pin);
 
-    // Discharge: drive pin LOW — pullup stays enabled but the
-    // output driver wins, pin is held LOW
+    // Discharge: drive the pin LOW; the output driver wins over the pull-up
     sio_hw->gpio_clr = mask;
     sio_hw->gpio_oe_set = mask;
     delayMicroseconds(2);
 
-    // Release to input — pullup is already live, charging starts
+    // Release to input: the pull-up is already live, charging starts
     uint32_t saved = save_and_disable_interrupts();
     sio_hw->gpio_oe_clr = mask;
 
     int count = 0;
-    for (int i = 0; i < 64; i++) {
-        if (!(sio_hw->gpio_in & mask))
-            count++;
-    }
+    for (int i = 0; i < 64; i++)
+        count += (int)((~sio_hw->gpio_in >> pin) & 1u);   // no branch on the level read
     restore_interrupts(saved);
 
-    // Leave pin discharged for next cycle
+    // Leave the pin discharged (driven LOW) until the next read
     sio_hw->gpio_clr = mask;
     sio_hw->gpio_oe_set = mask;
 
     return count;
 }
 
-// Configure all sense pins for parallel capacitive touch.
-// Call once at startup. Initialises each pin as GPIO with input
-// buffer enabled, pre-enables the internal pullup (left on
-// permanently), and leaves all pins discharged (output LOW).
+// Configure the sense pins for parallel capacitive touch. Call once at
+// startup, and again after any sense pin has been reconfigured (pinMode,
+// analogRead, another peripheral). Bits of sense_mask outside
+// GPIO 0..FT_RP_GPIOS-1 are ignored. Each pin becomes a GPIO with its input
+// buffer and internal pull-up on, and is left driven LOW (discharged).
 //
-// The pullup draws ~66µA per pin while the output driver holds
-// LOW during discharge (25 pins ≈ 1.65mA for 2µs) — negligible.
+// While a sense pin is held LOW, its pull-up draws current the whole time
+// it idles between reads: about 66µA per pin at 3.3V and ~50kΩ.
 void fastTouchBegin(uint32_t sense_mask)
 {
-    for (int i = 0; i < 32; i++) {
+    sense_mask &= FT_RP_VALID_MASK;
+    for (int i = 0; i < FT_RP_GPIOS; i++) {
         if (sense_mask & (1UL << i)) {
             gpio_init(i);
             gpio_pull_up(i);
@@ -869,60 +878,76 @@ void fastTouchBegin(uint32_t sense_mask)
 }
 
 // Parallel multi-channel capacitive touch read.
-// Discharges all pins in sense_mask simultaneously, waits 2 us,
-// clears OE in a single SIO write (pullups already live from
-// fastTouchBegin), then samples sio_hw->gpio_in n_samples times
-// with interrupts disabled. No APB writes in the critical section.
+// Discharges every pin in sense_mask (bits outside GPIO 0..FT_RP_GPIOS-1 are
+// ignored) for 2 us, releases them all with one SIO write (their pull-ups are
+// already on from fastTouchBegin), and with interrupts off stores n_samples
+// raw reads of sio_hw->gpio_in. Only after that does it count, for each pin,
+// the reads in which the pin was still LOW, into results[GPIO number]
+// (higher = more capacitance = touch detected). Storing first means every
+// read runs the same instructions whatever the number of pins or how many are
+// still LOW (the spacing itself has not been measured).
 //
-// For each pin in sense_mask, stores in results[bit_position] the
-// number of samples where that pin was still LOW (higher = more
-// capacitance = touch detected).
-//
-// n_samples is clamped to 255 (uint8_t max).
+// results[] needs 32 entries. n_samples is clamped to 0..255, so each count
+// fits a uint8_t. Not reentrant: the reads go through one static buffer, so
+// do not call it from both cores at once or from an interrupt handler.
 void fastTouchReadAll(uint32_t sense_mask, uint8_t *results, int n_samples)
 {
+    static uint32_t samples[255];
     if (n_samples > 255) n_samples = 255;
+    if (n_samples < 0) n_samples = 0;
+    sense_mask &= FT_RP_VALID_MASK;
 
-    // Zero result counters for active pins
-    for (int i = 0; i < 32; i++) {
-        if (sense_mask & (1UL << i))
-            results[i] = 0;
-    }
-
-    // Discharge all sense pins: output LOW
-    // Pullups stay enabled — driver overpowers them
+    // Discharge all sense pins: output LOW; the drivers win over the pull-ups
     sio_hw->gpio_clr = sense_mask;
     sio_hw->gpio_oe_set = sense_mask;
     delayMicroseconds(2);
 
-    // --- Critical section: single SIO write + sample loop ---
+    // --- Critical section: one SIO write, then n_samples stored reads ---
     uint32_t saved = save_and_disable_interrupts();
-    sio_hw->gpio_oe_clr = sense_mask;   // pullups already live
+    sio_hw->gpio_oe_clr = sense_mask;   // pull-ups already live
+    for (int s = 0; s < n_samples; s++)
+        samples[s] = sio_hw->gpio_in;
+    restore_interrupts(saved);
+    // --- End critical section ---
 
+    // Re-discharge: leave the sense pins driven LOW until the next read
+    sio_hw->gpio_clr = sense_mask;
+    sio_hw->gpio_oe_set = sense_mask;
+
+    for (int i = 0; i < FT_RP_GPIOS; i++) {
+        if (sense_mask & (1UL << i))
+            results[i] = 0;
+    }
     for (int s = 0; s < n_samples; s++) {
-        uint32_t low = (~sio_hw->gpio_in) & sense_mask;
+        uint32_t low = ~samples[s] & sense_mask;
         while (low) {
             int b = __builtin_ctz(low);
             results[b]++;
             low &= low - 1;             // clear lowest set bit
         }
     }
-    restore_interrupts(saved);
-    // --- End critical section ---
-
-    // Re-discharge all sense pins
-    sio_hw->gpio_clr = sense_mask;
-    sio_hw->gpio_oe_set = sense_mask;
 }
 
 #endif // ARDUINO_ARCH_RP2040
 
+// The largest value fastTouchRead() can return on this board, counted from
+// the implementation above or the macro in FastTouch.h
 int fastTouchMax()
 {
 #if defined(ARDUINO_ARCH_RP2040)
-    return 64;
+    return 64;    // 64 reads of gpio_in
+#elif defined(AVR)
+    return 11;    // the AVR macro sums 11 reads (ft_p..ft_z); includes Teensy 2.0
+#elif defined(_SAMD21_)
+    return 23;    // the SAMD21 macro sums 23 reads (ft_p..ft_z, ft_xo..ft_xz)
+#elif defined(__IMXRT1052__) || defined(__IMXRT1062__)
+    return 64;    // Teensy 4.x: the count loop stops at 64
+#elif defined(__MKL26Z64__)
+    return 64;    // Teensy LC: 64 minus the reads (of 64) that saw HIGH
+#elif defined(CORE_TEENSY)
+    return 127;   // Teensy 3.x: up to 117 chained LOW reads plus up to 10 from the ten reads before them
 #else
-    return 60;
+    return 0;     // not reached: FastTouch.h stops other boards with #error
 #endif
 }
 
