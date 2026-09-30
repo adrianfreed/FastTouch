@@ -1,0 +1,84 @@
+extras/checks/build_checks.zsh 632fdea, with BRAID_DIR=~/Documents/PinRoleSwitching/firmware/braid, run 2026-09-29
+on 80f236a; exit status 0 ("~" is the home directory, "<work>" the scratch build directory)
+
+FastTouch 80f236a; arduino-cli  Version: 1.5.1 Commit: Homebrew Date: 2026-06-05T09:39:33Z
+== 0. AVR pin maps
+ok       map at line 33: Port/DDR/PIN macros agree
+ok       map at line 91: Port/DDR/PIN macros agree
+ok       map at line 101: Port/DDR/PIN macros agree
+ok       map at line 119: Port/DDR/PIN macros agree
+ok       map at line 141: Port/DDR/PIN macros agree
+ok       map at line 150: Port/DDR/PIN macros agree
+6 maps checked, 0 inconsistent
+PASS | avr_pinmap_check.py: Port/DDR/PIN macros consistent
+== 1. RP2350B example
+PASS | ex-rpipico | rp2040:rp2040:rpipico | builds | Sketch uses 54520 bytes (2%)
+PASS | ex-rpipico2 | rp2040:rp2040:rpipico2 | builds | Sketch uses 51804 bytes (1%)
+PASS | ex-rp2350b | rp2040:rp2040:generic_rp2350:variantchip=RP2350B | builds | Sketch uses 51788 bytes (2%)
+PASS | ex-uno | arduino:avr:uno | stops with "This example needs an RP2040 or RP2350 board" | rc=1
+       FastTouchParallelRP2350B/FastTouchParallelRP2350B.ino:15:2: error: #error "This example needs an RP2040 or RP2350 board on the Arduino-Pico core"
+== 2. RP2350B probe and its control
+PASS | probeB-rp2350b | rp2040:rp2040:generic_rp2350:variantchip=RP2350B | builds | Sketch uses 51852 bytes (2%)
+PASS | probeB-control-rpipico2 | rp2040:rp2040:rpipico2 | stops with "not an RP2350B build" | rc=1
+       probe_rp2350b/probe_rp2350b.ino:6:2: error: #error "not an RP2350B build (PICO_RP2350A is undefined or nonzero)"
+== 3. fastTouchMax() on each family
+PASS | max-uno | arduino:avr:uno | builds | Sketch uses 2584 bytes (8%)
+PASS | max-cpx | adafruit:samd:adafruit_circuitplayground_m0 | builds | Sketch uses 11356 bytes (4%)
+PASS | max-teensy2 | teensy:avr:teensy2 | builds | rc=0
+PASS | max-teensy31 | teensy:avr:teensy31 | builds | rc=0
+PASS | max-teensyLC | teensy:avr:teensyLC | builds | rc=0
+PASS | max-teensy40 | teensy:avr:teensy40 | builds | FLASH: code:9732, data:3016, headers:8752   free for files:2010116
+PASS | max-rpipico | rp2040:rp2040:rpipico | builds | Sketch uses 54320 bytes (2%)
+PASS | max-teensy2 | fastTouchMax() returns 11, expected 11
+PASS | max-cpx | fastTouchMax() returns 23, expected 23
+PASS | max-teensy31 | fastTouchMax() returns 127, expected 127
+PASS | max-teensyLC | fastTouchMax() returns 64, expected 64
+PASS | max-teensy40 | fastTouchMax() returns 64, expected 64
+PASS | max-rpipico | fastTouchMax() returns 64, expected 64
+== 4. AVR pin maps: mapped chips build, the rest stop at the pin-map #error
+PASS | map-mega | arduino:avr:mega | builds | Sketch uses 3288 bytes (1%)
+PASS | map-pro328 | arduino:avr:pro:cpu=16MHzatmega328 | builds | Sketch uses 2584 bytes (8%)
+PASS | map-pro168 | arduino:avr:pro:cpu=16MHzatmega168 | builds | Sketch uses 2584 bytes (18%)
+PASS | map-644p | arduino:avr:uno | builds | Sketch uses 2610 bytes (8%)
+PASS | nomap-1281 | arduino:avr:mega | stops with "no pin map for this AVR chip" | rc=1
+       FastTouch.h:162:2: error: #error "FastTouch has no pin map for this AVR chip; it covers the ATmega168/168P/328/328P/328PB, 32U4/16U4, 1280/2560 and 644/644P"
+PASS | nomap-gemma | adafruit:avr:gemma | stops with "no pin map for this AVR chip" | rc=1
+       FastTouch.h:162:2: error: #error "FastTouch has no pin map for this AVR chip; it covers the ATmega168/168P/328/328P/328PB, 32U4/16U4, 1280/2560 and 644/644P"
+PASS | nomap-teensypp2 | teensy:avr:teensypp2 | stops with "no pin map for this AVR chip" | rc=1
+       FastTouch.h:162:2: error: #error "FastTouch has no pin map for this AVR chip; it covers the ATmega168/168P/328/328P/328PB, 32U4/16U4, 1280/2560 and 644/644P"
+== 4b. boards outside AVR, SAMD21, Teensy and RP2040/RP2350 stop at the library's #error
+PASS | unsup-samd51 | adafruit:samd:adafruit_itsybitsy_m4 | stops with "FastTouch supports AVR, SAMD21, Teensy and RP2040/RP2350" | rc=1
+       FastTouch.h:268:2: error: #error "FastTouch supports AVR, SAMD21, Teensy and RP2040/RP2350 (Arduino-Pico core) boards; this board is none of those"
+PASS | unsup-esp32s3 | esp32:esp32:m5stack_capsule | stops with "FastTouch supports AVR, SAMD21, Teensy and RP2040/RP2350" | rc=1
+       FastTouch.h:268:2: error: #error "FastTouch supports AVR, SAMD21, Teensy and RP2040/RP2350 (Arduino-Pico core) boards; this board is none of those"
+== 5. existing examples
+PASS | reportlily | arduino:avr:LilyPadUSB | builds | Sketch uses 6758 bytes (23%)
+PASS | tonelily | arduino:avr:LilyPadUSB | builds | Sketch uses 8714 bytes (30%)
+PASS | tonecpx | adafruit:samd:adafruit_circuitplayground_m0 | builds | /UsersSketch uses 16600 bytes (6%)
+PASS | teensy40 | teensy:avr:teensy40 | builds | FLASH: code:9748, data:3016, headers:8736   free for files:2010116
+PASS | teensyLC | teensy:avr:teensyLC | builds | rc=0
+PASS | teensy31 | teensy:avr:teensy31 | builds | rc=0
+== 6. braid XIAO build with FastTouch (~/Documents/PinRoleSwitching/firmware/braid)
+PASS | braid-xiao | Seeeduino:samd:seeed_XIAO_m0 | builds | Sketch uses 48460 bytes (18%)
+== 7. the same example sketches against the library at 632fdea (information, not graded)
+   reportlily: 3 output files, identical
+   tonelily: 3 output files, identical
+   tonecpx: 2 output files, identical
+   teensy40: 1 output files, identical
+   teensyLC: 1 output files, identical
+   teensy31: 1 output files, identical
+   braid-xiao: 2 output files, identical
+== RP2040/RP2350 disassembly of the timed functions: <work>/ft-checks-final/rp-disassembly.txt
+build checks: 36 passed, 0 failed (work dir <work>/ft-checks-final)
+
+---- separately, the same day: extras/checks/avr_pinmap_check.py on 632fdea's src/FastTouch.h (git show 632fdea:src/FastTouch.h)
+ok       map at line 34: Port/DDR/PIN macros agree
+MISMATCH map at line 92: Port/DDR/PIN macros differ
+         DDR departs from Port at: ...P)>=8&&(P)<=15)?&REG_D:(((P)>=8&&(P)<=15)?&REG_C:&REG_A)))...
+         PIN departs from Port at: ...P)>=8&&(P)<=15)?&REG_D:(((P)>=8&&(P)<=15)?&REG_C:&REG_A)))...
+ok       map at line 102: Port/DDR/PIN macros agree
+ok       map at line 120: Port/DDR/PIN macros agree
+ok       map at line 140: Port/DDR/PIN macros agree
+ok       map at line 149: Port/DDR/PIN macros agree
+6 maps checked, 1 inconsistent
+exit status 1
